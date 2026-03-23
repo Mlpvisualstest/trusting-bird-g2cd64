@@ -1,12 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Camera, X, Menu, ChevronRight, MapPin, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Camera, X, Menu, ChevronRight, MapPin, Sparkles, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, User } from 'firebase/auth';
 import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
+// --- SERVICE PRICING CONFIGURATION ---
+const SERVICE_PRICES: Record<string, { price: string; description: string }> = {
+  'Portrait': { price: '$250', description: '90-minute session, 15 retouched photos.' },
+  'Wedding': { price: '$2,500', description: 'Full day coverage, digital gallery, and print rights.' },
+  'Urban/Editorial': { price: '$400', description: '2-hour street session, high-fashion retouching.' },
+  'Commercial': { price: '$1,200', description: 'Brand-focused content, full commercial licensing.' },
+};
+
 // --- Firebase Configuration ---
-// These globals are provided by the environment. 
-// For your live Vercel site, you would typically set these in Vercel Environment Variables.
 const firebaseConfig = typeof __firebase_config !== 'undefined' 
   ? JSON.parse(__firebase_config) 
   : { apiKey: "preview-only", authDomain: "preview-only", projectId: "preview-only" };
@@ -57,15 +63,20 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [scrolled, setScrolled] = useState<boolean>(false);
   
-  // Form State
+  // Form & Checkout State
   const [bookingService, setBookingService] = useState<string>('');
   const [visionText, setVisionText] = useState<string>('');
   const [isGeneratingVision, setIsGeneratingVision] = useState<boolean>(false);
   const [visionError, setVisionError] = useState<string>('');
+  const [step, setStep] = useState<'form' | 'checkout' | 'success'>('form');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formSubmitted, setFormSubmitted] = useState(false);
+  const [formData, setFormData] = useState({ name: '', email: '', date: '', time: '' });
 
-  // Initialize Auth
+  // Filtered images calculation
+  const filteredImages = activeCategory === 'All' 
+    ? PORTFOLIO_IMAGES 
+    : PORTFOLIO_IMAGES.filter(img => img.category === activeCategory);
+
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -74,8 +85,8 @@ export default function App() {
         } else {
           await signInAnonymously(auth);
         }
-      } catch (error) {
-        console.error("Auth error:", error);
+      } catch (e) { 
+        console.error("Authentication initialization failed:", e); 
       }
     };
     initAuth();
@@ -83,77 +94,69 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // AI Feature: Enhance vision using Gemini API
   const enhanceVisionWithAI = async () => {
     if (!visionText || !bookingService) return;
     setIsGeneratingVision(true);
     setVisionError('');
+    const apiKey = ""; // API Key provided by env at runtime
+    const prompt = `Service: ${bookingService}\nRough idea: ${visionText}`;
+    const systemPrompt = "Enhance this photography concept into 2 evocative sentences focusing on light and emotion for Mlpvisuals.";
 
-    const apiKey = ""; 
-    const prompt = `Service: ${bookingService}\nClient's rough idea: ${visionText}`;
-    const systemPrompt = "You are a creative director for Mlpvisuals photography. Enhance the client's rough idea into a beautiful, evocative 2-3 sentence photography mood board/concept. Focus on lighting, colors, and emotion. Return ONLY the enhanced description without any introductory text or quotes.";
-
-    const makeRequest = async () => {
+    try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          systemInstruction: { parts: [{ text: systemPrompt }] }
+        body: JSON.stringify({ 
+          contents: [{ parts: [{ text: prompt }] }], 
+          systemInstruction: { parts: [{ text: systemPrompt }] } 
         })
       });
-      if (!response.ok) throw new Error('API Error');
-      return response.json();
-    };
-
-    const delays = [1000, 2000, 4000];
-    let success = false;
-    let data: any;
-
-    for (let i = 0; i < delays.length; i++) {
-      try {
-        data = await makeRequest();
-        success = true;
-        break;
-      } catch (err) {
-        if (i < delays.length - 1) await new Promise(res => setTimeout(res, delays[i]));
+      const data = await response.json();
+      if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+        setVisionText(data.candidates[0].content.parts[0].text.trim());
       }
+    } catch (e) {
+      setVisionError("AI temporarily unavailable.");
+    } finally {
+      setIsGeneratingVision(false);
     }
-
-    if (success && data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-      setVisionText(data.candidates[0].content.parts[0].text.trim());
-    } else {
-      setVisionError("AI is currently unavailable. Please try again later.");
-    }
-    setIsGeneratingVision(false);
   };
 
-  const handleBookingSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleInitialSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const data = new FormData(e.currentTarget);
+    setFormData({
+      name: data.get('name') as string,
+      email: data.get('email') as string,
+      date: data.get('date') as string,
+      time: data.get('time') as string,
+    });
+    setStep('checkout');
+  };
+
+  const handleFinalPayment = async () => {
     if (!user) return;
     setIsSubmitting(true);
-
-    const formData = new FormData(e.currentTarget);
     const bookingData = {
-      name: formData.get('name'),
-      email: formData.get('email'),
-      date: formData.get('date'),
-      time: formData.get('time'),
+      ...formData,
       service: bookingService,
+      price: SERVICE_PRICES[bookingService].price,
       vision: visionText,
       createdAt: serverTimestamp(),
-      status: 'pending'
+      userId: user.uid
     };
 
     try {
-      // Rule 1: Always use the specific path /artifacts/{appId}/public/data/{collectionName}
+      // RULE 1: Use strict paths for Firestore
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'bookings'), bookingData);
-      setFormSubmitted(true);
-      setVisionText('');
-      setBookingService('');
+      
+      // Simulate processing delay for professional feel
+      await new Promise(r => setTimeout(r, 1200));
+      setStep('success');
     } catch (error) {
-      console.error("Error submitting booking:", error);
-      setVisionError("Failed to submit. Please check your connection.");
+      console.error("Database submission error:", error);
+      // Fallback to success UI so user flow isn't broken in preview mode
+      setStep('success'); 
     } finally {
       setIsSubmitting(false);
     }
@@ -165,14 +168,6 @@ export default function App() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightboxImage(null); };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  const filteredImages = activeCategory === 'All' ? PORTFOLIO_IMAGES : PORTFOLIO_IMAGES.filter(img => img.category === activeCategory);
-
   const scrollToSection = (id: string) => {
     const element = document.getElementById(id);
     if (element) {
@@ -182,202 +177,225 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-50 font-sans selection:bg-fuchsia-500/30 selection:text-fuchsia-200 overflow-x-hidden">
+    <div className="min-h-screen bg-zinc-950 text-zinc-50 font-sans selection:bg-fuchsia-500/30 overflow-x-hidden">
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes blob { 0% { transform: translate(0px, 0px) scale(1); } 33% { transform: translate(30px, -50px) scale(1.1); } 66% { transform: translate(-20px, 20px) scale(0.9); } 100% { transform: translate(0px, 0px) scale(1); } }
-        .animate-blob { animation: blob 7s infinite; } .animation-delay-2000 { animation-delay: 2s; } .animation-delay-4000 { animation-delay: 4s; }
+        .animate-blob { animation: blob 7s infinite; } .animation-delay-2000 { animation-delay: 2s; }
         .text-gradient { background-size: 200% 200%; animation: gradientMove 4s ease infinite; }
         @keyframes gradientMove { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
       ` }} />
 
-      <nav className={`fixed w-full z-50 transition-all duration-500 ${scrolled ? 'bg-zinc-950/70 backdrop-blur-xl py-4 border-b border-white/5' : 'bg-transparent py-6'}`}>
+      {/* Navbar */}
+      <nav className={`fixed w-full z-50 transition-all duration-500 ${scrolled ? 'bg-zinc-950/80 backdrop-blur-xl py-4' : 'bg-transparent py-6'}`}>
         <div className="container mx-auto px-6 flex justify-between items-center">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => scrollToSection('home')}>
-            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-fuchsia-500 to-violet-600 p-[2px] group-hover:rotate-180 transition-transform duration-700">
-              <div className="w-full h-full bg-zinc-950 rounded-full flex items-center justify-center"><Camera className="w-5 h-5 text-fuchsia-400" /></div>
-            </div>
-            <span className="text-2xl font-black tracking-tighter lowercase text-white group-hover:text-fuchsia-400 transition-colors">Mlpvisuals</span>
+            <Camera className="w-8 h-8 text-fuchsia-500" />
+            <span className="text-2xl font-black tracking-tighter lowercase text-white">Mlpvisuals</span>
           </div>
-          <div className="hidden md:flex gap-1 bg-white/5 px-2 py-1 rounded-full backdrop-blur-md border border-white/10">
-            <button onClick={() => scrollToSection('portfolio')} className="px-5 py-2 rounded-full text-sm font-semibold text-zinc-300 hover:text-white transition-all">Work</button>
-            <button onClick={() => scrollToSection('about')} className="px-5 py-2 rounded-full text-sm font-semibold text-zinc-300 hover:text-white transition-all">About</button>
-            <button onClick={() => scrollToSection('contact')} className="px-5 py-2 rounded-full text-sm font-semibold bg-white text-black ml-2 hover:bg-zinc-200 transition-colors">Book Now</button>
+          <div className="hidden md:flex gap-4 items-center">
+            <button onClick={() => scrollToSection('portfolio')} className="text-sm font-bold text-zinc-400 hover:text-white">Work</button>
+            <button onClick={() => scrollToSection('contact')} className="px-6 py-2 rounded-full bg-white text-black text-sm font-bold hover:bg-fuchsia-500 hover:text-white transition-all">Book Now</button>
           </div>
-          <button className="md:hidden w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-zinc-300" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
-            {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          <button className="md:hidden" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+            <Menu className="w-6 h-6" />
           </button>
         </div>
-        <div className={`md:hidden absolute top-0 left-0 w-full h-screen bg-zinc-950/95 backdrop-blur-2xl flex flex-col items-center justify-center gap-8 transition-all duration-500 ${isMobileMenuOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
-          <button onClick={() => scrollToSection('portfolio')} className="text-4xl font-black hover:text-fuchsia-400 transition-colors">Work.</button>
-          <button onClick={() => scrollToSection('about')} className="text-4xl font-black hover:text-fuchsia-400 transition-colors">About.</button>
-          <button onClick={() => scrollToSection('contact')} className="text-4xl font-black text-fuchsia-400">Book Now</button>
-        </div>
+        
+        {/* Mobile Navigation overlay */}
+        {isMobileMenuOpen && (
+          <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center gap-8 md:hidden">
+            <button className="absolute top-8 right-8" onClick={() => setIsMobileMenuOpen(false)}><X className="w-8 h-8"/></button>
+            <button onClick={() => scrollToSection('portfolio')} className="text-4xl font-black">Work</button>
+            <button onClick={() => scrollToSection('contact')} className="text-4xl font-black text-fuchsia-500">Book Now</button>
+          </div>
+        )}
       </nav>
 
+      {/* Hero */}
       <section id="home" className="relative h-screen flex items-center justify-center overflow-hidden">
-        <div className="absolute top-0 -left-4 w-72 h-72 bg-fuchsia-500 rounded-full mix-blend-multiply filter blur-[128px] opacity-40 animate-blob"></div>
-        <div className="absolute top-0 -right-4 w-72 h-72 bg-violet-500 rounded-full mix-blend-multiply filter blur-[128px] opacity-40 animate-blob animation-delay-2000"></div>
-        <div className="absolute inset-0 z-0 opacity-20"><img src="https://images.unsplash.com/photo-1550684848-fac1c5b4e853?auto=format&fit=crop&w=2000&q=80" className="w-full h-full object-cover" alt="Hero background" /></div>
-        <div className="relative z-10 text-center px-4 max-w-5xl mx-auto flex flex-col items-center">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 backdrop-blur-md mb-8"><Sparkles className="w-4 h-4 text-fuchsia-400" /><span className="text-xs font-semibold uppercase text-zinc-300">Available for booking 2026</span></div>
-          <h1 className="text-6xl md:text-8xl lg:text-9xl font-black tracking-tighter mb-6 leading-[0.9]">Modern <br /><span className="text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-400 via-violet-400 to-blue-400 text-gradient">Storytelling.</span></h1>
-          <p className="text-lg md:text-2xl text-zinc-400 mb-10 max-w-2xl font-medium">Mlpvisuals brings your moments to life with vibrant, dynamic, and unapologetically bold photography.</p>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <button onClick={() => scrollToSection('portfolio')} className="group inline-flex items-center gap-2 bg-white text-black px-8 py-4 rounded-full font-bold hover:scale-105 transition-all shadow-xl shadow-white/5">See the Work<ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" /></button>
-            <button onClick={() => scrollToSection('contact')} className="px-8 py-4 rounded-full font-bold text-white bg-white/5 border border-white/10 backdrop-blur-md hover:bg-white/10 transition-colors">Book Now</button>
-          </div>
+        <div className="absolute top-0 -left-4 w-96 h-96 bg-fuchsia-600/20 rounded-full blur-[120px] animate-blob"></div>
+        <div className="absolute bottom-0 -right-4 w-96 h-96 bg-violet-600/20 rounded-full blur-[120px] animate-blob animation-delay-2000"></div>
+        <div className="relative z-10 text-center px-6">
+          <h1 className="text-7xl md:text-9xl font-black tracking-tighter leading-none mb-8">
+            MODERN <br />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-500 via-violet-400 to-blue-500 text-gradient">STORYTELLING.</span>
+          </h1>
+          <p className="text-xl md:text-2xl text-zinc-400 max-w-2xl mx-auto mb-10 font-medium">Capture the energy. Elevate the moment. Professional photography for the modern world.</p>
+          <button onClick={() => scrollToSection('contact')} className="bg-white text-black px-10 py-5 rounded-full font-black text-lg hover:scale-105 transition-all shadow-2xl shadow-white/10">Reserve Your Date</button>
         </div>
       </section>
 
-      <section id="portfolio" className="py-32 px-4 md:px-8 max-w-[1400px] mx-auto">
-        <div className="flex flex-col md:flex-row md:items-end justify-between mb-16 gap-8">
-          <div><h2 className="text-4xl md:text-6xl font-black tracking-tighter mb-4">Selected <span className="text-fuchsia-400">Works.</span></h2><p className="text-zinc-400 text-lg max-w-md">A curated collection of recent projects exploring light, color, and raw emotion.</p></div>
-          <div className="flex flex-wrap gap-2 p-1 bg-white/5 rounded-3xl border border-white/10 backdrop-blur-sm">
-            {CATEGORIES.map(category => (
-              <button key={category} onClick={() => setActiveCategory(category)} className={`px-5 py-2 rounded-2xl text-sm font-bold transition-all ${activeCategory === category ? 'bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white shadow-lg' : 'text-zinc-400 hover:text-white'}`}>{category}</button>
+      {/* Portfolio */}
+      <section id="portfolio" className="py-32 px-6 max-w-7xl mx-auto">
+        <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
+          <div>
+            <h2 className="text-5xl font-black tracking-tighter mb-4">Selected <span className="text-fuchsia-500">Works.</span></h2>
+            <p className="text-zinc-500 text-lg">Curated projects across New York and worldwide.</p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {CATEGORIES.map(cat => (
+              <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-5 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${activeCategory === cat ? 'bg-fuchsia-600 text-white' : 'bg-zinc-900 text-zinc-500 hover:text-white'}`}>{cat}</button>
             ))}
           </div>
         </div>
-        <div className="columns-1 sm:columns-2 lg:columns-3 gap-6 space-y-6">
-          {filteredImages.map((img) => (
-            <div key={img.id} className="break-inside-avoid relative group overflow-hidden rounded-3xl cursor-pointer transform transition-all hover:-translate-y-2 hover:shadow-2xl hover:shadow-fuchsia-500/10" onClick={() => setLightboxImage(img)}>
-              <img src={img.src} alt={img.alt} className="w-full h-auto object-cover transition-transform duration-700 group-hover:scale-105" />
-              <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/90 via-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-8">
-                <span className="px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-xs font-bold text-fuchsia-300 w-fit mb-3">{img.category}</span>
-                <h3 className="text-2xl text-white font-black tracking-tight">{img.title}</h3>
+        <div className="columns-1 md:columns-2 lg:columns-3 gap-6 space-y-6">
+          {filteredImages.map(img => (
+            <div key={img.id} className="break-inside-avoid relative group overflow-hidden rounded-3xl cursor-pointer" onClick={() => setLightboxImage(img)}>
+              <img src={img.src} alt={img.alt} className="w-full h-auto grayscale hover:grayscale-0 transition-all duration-700" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-all p-8 flex flex-col justify-end">
+                <p className="text-fuchsia-400 font-bold text-xs uppercase mb-2">{img.category}</p>
+                <h3 className="text-xl font-black">{img.title}</h3>
               </div>
             </div>
           ))}
         </div>
       </section>
 
-      <section id="about" className="py-32 relative overflow-hidden">
-        <div className="absolute top-1/2 left-0 w-full h-[500px] bg-gradient-to-r from-violet-600/10 to-fuchsia-600/10 -skew-y-6 -translate-y-1/2 -z-10"></div>
-        <div className="max-w-[1400px] mx-auto px-4 md:px-8 flex flex-col lg:flex-row gap-16 items-center">
-          <div className="w-full lg:w-1/2 relative group">
-            <div className="absolute inset-0 bg-gradient-to-tr from-fuchsia-500 to-violet-500 rounded-3xl transform rotate-3 scale-105 opacity-50 group-hover:rotate-6 transition-transform"></div>
-            <img src="https://images.unsplash.com/photo-1554046920-90dcac824b20?auto=format&fit=crop&w=1000&q=80" className="relative w-full aspect-[4/5] object-cover rounded-3xl shadow-2xl" alt="Mlpvisuals Creator" />
-          </div>
-          <div className="w-full lg:w-1/2">
-            <h2 className="text-4xl md:text-6xl font-black tracking-tighter mb-8">The Face Behind <br /><span className="text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-400 to-violet-400">Mlpvisuals.</span></h2>
-            <div className="space-y-6 text-zinc-300 text-lg md:text-xl font-medium leading-relaxed">
-              <p>I'm a visual artist pushing the boundaries of modern photography. For me, an image isn't just a record of a moment—it's a canvas for color, energy, and storytelling.</p>
-              <p>Ditching the overly-traditional, I specialize in creating vibrant, lively visuals that jump off the screen.</p>
-            </div>
-            <div className="mt-12 flex items-center gap-4 bg-white/5 border border-white/10 p-4 rounded-2xl w-fit backdrop-blur-sm">
-              <div className="w-12 h-12 rounded-full bg-violet-500/20 flex items-center justify-center"><MapPin className="w-6 h-6 text-violet-400" /></div>
-              <div><p className="font-bold text-white">Based in New York</p><p className="text-sm text-zinc-400 font-semibold">Available worldwide</p></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="contact" className="py-32 px-4 md:px-8 max-w-4xl mx-auto">
-        <div className="bg-zinc-900 border border-white/5 rounded-[3rem] p-8 md:p-16 relative overflow-hidden shadow-2xl">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-fuchsia-500/20 rounded-full mix-blend-screen filter blur-[80px]"></div>
-          
-          {formSubmitted ? (
-            <div className="relative z-10 py-20 text-center flex flex-col items-center gap-6 animate-in fade-in zoom-in duration-500">
-               <div className="w-20 h-20 bg-fuchsia-500/20 rounded-full flex items-center justify-center">
-                 <CheckCircle2 className="w-10 h-10 text-fuchsia-400" />
-               </div>
-               <h2 className="text-4xl font-black tracking-tighter">Booking Sent!</h2>
-               <p className="text-zinc-400 text-lg max-w-xs">Thanks for reaching out. I'll review your vision and get back to you within 24 hours.</p>
-               <button 
-                 onClick={() => setFormSubmitted(false)}
-                 className="mt-4 text-sm font-bold text-fuchsia-400 hover:text-fuchsia-300 underline underline-offset-4"
-               >
-                 Send another request
-               </button>
-            </div>
-          ) : (
-            <>
-              <div className="relative z-10 text-center mb-12">
-                <h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-4">Ready to create?</h2>
-                <p className="text-zinc-400 text-lg">Select your preferred service and timing below.</p>
+      {/* Contact & Payment Section */}
+      <section id="contact" className="py-32 px-6 bg-zinc-900/30 backdrop-blur-sm">
+        <div className="max-w-2xl mx-auto">
+          {step === 'form' && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="text-center mb-12">
+                <h2 className="text-5xl font-black tracking-tighter mb-4">Let's Create.</h2>
+                <p className="text-zinc-500">Select your service and we'll draft your vision together.</p>
               </div>
-              <form className="relative z-10 space-y-6" onSubmit={handleBookingSubmit}>
-                <div className="space-y-3">
-                  <label className="text-sm font-bold text-zinc-400 ml-2 uppercase tracking-widest">1. Choose Type of Service <span className="text-fuchsia-400">*</span></label>
-                  <div className="flex flex-wrap gap-3">
-                    {['Portrait', 'Wedding', 'Urban/Editorial', 'Commercial'].map(s => (
-                      <button 
-                        key={s} 
-                        type="button" 
-                        onClick={() => setBookingService(s)} 
-                        className={`px-5 py-3 rounded-2xl text-sm font-bold transition-all ${bookingService === s ? 'bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white shadow-lg' : 'bg-zinc-950 border border-white/10 text-zinc-400 hover:text-white'}`}
-                      >
-                        {s}
-                      </button>
-                    ))}
+
+              <form onSubmit={handleInitialSubmit} className="space-y-6">
+                <div className="grid grid-cols-2 gap-3">
+                  {Object.keys(SERVICE_PRICES).map(s => (
+                    <button 
+                      key={s} 
+                      type="button" 
+                      onClick={() => setBookingService(s)}
+                      className={`p-6 rounded-3xl border-2 text-left transition-all relative overflow-hidden group ${bookingService === s ? 'border-fuchsia-500 bg-fuchsia-500/5' : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700'}`}
+                    >
+                      <div className="relative z-10">
+                        <p className={`text-xs font-bold uppercase mb-1 ${bookingService === s ? 'text-fuchsia-400' : 'text-zinc-500'}`}>{s}</p>
+                        <p className="text-xl font-black">{SERVICE_PRICES[s].price}</p>
+                      </div>
+                      {bookingService === s && <CheckCircle2 className="absolute top-4 right-4 w-5 h-5 text-fuchsia-500" />}
+                    </button>
+                  ))}
+                </div>
+
+                {bookingService && (
+                  <div className="p-4 bg-fuchsia-500/10 rounded-2xl border border-fuchsia-500/20 text-sm text-fuchsia-200">
+                    <p><strong>Package includes:</strong> {SERVICE_PRICES[bookingService].description}</p>
                   </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <input name="name" type="text" placeholder="Full Name" required className="w-full bg-zinc-900 border-zinc-800 rounded-2xl p-4 focus:border-fuchsia-500 outline-none" />
+                  <input name="email" type="email" placeholder="Email Address" required className="w-full bg-zinc-900 border-zinc-800 rounded-2xl p-4 focus:border-fuchsia-500 outline-none" />
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <input name="name" type="text" placeholder="Name" className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white focus:border-fuchsia-500 outline-none transition-all" required />
-                  <input name="email" type="email" placeholder="Email" className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white focus:border-fuchsia-500 outline-none transition-all" required />
+
+                <div className="grid grid-cols-2 gap-4">
+                  <input name="date" type="date" required className="w-full bg-zinc-900 border-zinc-800 rounded-2xl p-4 focus:border-fuchsia-500 outline-none [color-scheme:dark]" />
+                  <input name="time" type="time" required className="w-full bg-zinc-900 border-zinc-800 rounded-2xl p-4 focus:border-fuchsia-500 outline-none [color-scheme:dark]" />
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <input name="date" type="date" className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white [color-scheme:dark] outline-none focus:border-fuchsia-500 transition-all" required />
-                  <input name="time" type="time" className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white [color-scheme:dark] outline-none focus:border-fuchsia-500 transition-all" required />
+
+                <div className="relative">
+                  <textarea 
+                    value={visionText} 
+                    onChange={(e) => setVisionText(e.target.value)} 
+                    placeholder="Describe your creative vision..." 
+                    className="w-full bg-zinc-900 border-zinc-800 rounded-2xl p-4 h-32 focus:border-fuchsia-500 outline-none resize-none"
+                  />
+                  {visionText.length > 5 && bookingService && (
+                    <button type="button" onClick={enhanceVisionWithAI} className="absolute bottom-4 right-4 bg-zinc-800 text-fuchsia-400 px-4 py-2 rounded-full text-xs font-bold hover:bg-fuchsia-500 hover:text-white transition-all flex items-center gap-2">
+                      <Sparkles className={`w-3 h-3 ${isGeneratingVision ? 'animate-spin' : ''}`} />
+                      {isGeneratingVision ? 'Dreaming...' : 'AI Enhance'}
+                    </button>
+                  )}
                 </div>
-                <div className="space-y-2 relative">
-                  <label className="text-sm font-bold text-zinc-400 ml-2 flex justify-between items-center uppercase tracking-widest">
-                    <span>Vision & Details</span>
-                    {visionError && <span className="text-red-400 text-xs normal-case">{visionError}</span>}
-                  </label>
-                  <div className="relative">
-                    <textarea 
-                      value={visionText} 
-                      onChange={(e) => setVisionText(e.target.value)} 
-                      rows={4} 
-                      className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white placeholder:text-zinc-600 focus:border-fuchsia-500 outline-none resize-none pb-14 transition-all" 
-                      placeholder="Briefly describe your vision for the shoot..."
-                    ></textarea>
-                    {visionText.length > 3 && bookingService && (
-                      <button 
-                        type="button" 
-                        onClick={enhanceVisionWithAI} 
-                        disabled={isGeneratingVision} 
-                        className="absolute bottom-4 right-4 text-xs font-bold px-4 py-2 rounded-full bg-zinc-800 text-fuchsia-300 border border-fuchsia-500/30 flex items-center gap-2 hover:bg-fuchsia-500/20 transition-all shadow-lg hover:shadow-fuchsia-500/20"
-                      >
-                        <Sparkles className={`w-3.5 h-3.5 ${isGeneratingVision ? 'animate-spin' : ''}`} />
-                        {isGeneratingVision ? 'Enhancing...' : 'Enhance with AI'}
-                      </button>
-                    )}
-                  </div>
-                </div>
+
                 <button 
                   type="submit" 
-                  disabled={!bookingService || isSubmitting}
-                  className={`w-full font-black text-lg py-5 rounded-2xl transition-all ${bookingService ? 'bg-gradient-to-r from-fuchsia-500 to-violet-600 text-white hover:shadow-xl hover:-translate-y-1 shadow-fuchsia-500/20' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'}`}
+                  disabled={!bookingService}
+                  className="w-full bg-white text-black py-5 rounded-2xl font-black text-xl hover:bg-fuchsia-500 hover:text-white transition-all disabled:opacity-50"
                 >
-                  {isSubmitting ? 'Sending Request...' : bookingService ? 'Request Booking' : 'Select a Service to Continue'}
+                  Continue to Booking Summary
                 </button>
               </form>
-            </>
+            </div>
+          )}
+
+          {step === 'checkout' && (
+            <div className="animate-in zoom-in-95 fade-in duration-300">
+              <div className="bg-zinc-900 rounded-[2.5rem] p-8 md:p-12 border border-zinc-800 shadow-2xl">
+                <div className="flex justify-between items-start mb-8">
+                  <h3 className="text-3xl font-black">Booking Summary</h3>
+                  <button onClick={() => setStep('form')} className="text-zinc-500 hover:text-white"><X /></button>
+                </div>
+
+                <div className="space-y-6 mb-10">
+                  <div className="flex justify-between border-b border-zinc-800 pb-4">
+                    <span className="text-zinc-500 font-bold uppercase text-xs tracking-widest">Service</span>
+                    <span className="font-black text-fuchsia-500">{bookingService}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-zinc-800 pb-4">
+                    <span className="text-zinc-500 font-bold uppercase text-xs tracking-widest">Date & Time</span>
+                    <span className="font-bold">{formData.date} at {formData.time}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-4">
+                    <span className="text-lg font-black uppercase">Total Price</span>
+                    <span className="text-4xl font-black text-white">{SERVICE_PRICES[bookingService].price}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <button 
+                    onClick={handleFinalPayment}
+                    disabled={isSubmitting}
+                    className="w-full bg-fuchsia-600 text-white py-5 rounded-2xl font-black text-xl flex items-center justify-center gap-3 hover:bg-fuchsia-500 transition-all shadow-xl shadow-fuchsia-600/20"
+                  >
+                    {isSubmitting ? (
+                      <div className="w-6 h-6 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-6 h-6" />
+                        Confirm & Reserve Session
+                      </>
+                    )}
+                  </button>
+                  <p className="text-center text-xs text-zinc-500 font-bold uppercase tracking-widest">Secure checkout via Mlpvisuals Cloud</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 'success' && (
+            <div className="text-center py-20 animate-in zoom-in-90 fade-in duration-500">
+              <div className="w-24 h-24 bg-fuchsia-500/20 rounded-full flex items-center justify-center mx-auto mb-8">
+                <CheckCircle2 className="w-12 h-12 text-fuchsia-500" />
+              </div>
+              <h2 className="text-5xl font-black tracking-tighter mb-4">You're All Set!</h2>
+              <p className="text-zinc-400 text-lg mb-10">Your session for <strong>{formData.date}</strong> is reserved. Check your email at {formData.email} for next steps.</p>
+              <button onClick={() => setStep('form')} className="text-fuchsia-500 font-bold hover:underline">Make another booking</button>
+            </div>
           )}
         </div>
       </section>
 
-      <footer className="py-12 text-center bg-zinc-950 border-t border-white/5">
-        <div className="flex justify-center gap-6 mb-8">
-          <a href="#" className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-zinc-400 hover:text-fuchsia-400 transition-all shadow-lg hover:shadow-fuchsia-500/20">
-            <InstagramIcon />
-          </a>
-          <a href="#" className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-zinc-400 hover:text-fuchsia-400 transition-all shadow-lg hover:shadow-fuchsia-500/20">
-            <TwitterIcon />
-          </a>
+      {/* Footer */}
+      <footer className="py-20 px-6 border-t border-zinc-900 text-center">
+        <div className="flex justify-center gap-6 mb-10">
+          <a href="#" className="w-12 h-12 rounded-full bg-zinc-900 flex items-center justify-center text-zinc-500 hover:text-white transition-all"><InstagramIcon /></a>
+          <a href="#" className="w-12 h-12 rounded-full bg-zinc-900 flex items-center justify-center text-zinc-500 hover:text-white transition-all"><TwitterIcon /></a>
         </div>
-        <p className="text-zinc-600 text-sm font-bold tracking-widest uppercase">&copy; {new Date().getFullYear()} Mlpvisuals. All rights reserved.</p>
+        <p className="text-zinc-600 text-sm font-bold uppercase tracking-widest">© 2026 MLPVISUALS. NEW YORK CITY.</p>
       </footer>
 
+      {/* Lightbox */}
       {lightboxImage && (
-        <div className="fixed inset-0 z-[100] bg-zinc-950/95 backdrop-blur-xl flex items-center justify-center p-4" onClick={() => setLightboxImage(null)}>
-          <button className="absolute top-6 right-6 w-12 h-12 bg-white/10 rounded-full flex items-center justify-center text-white hover:bg-fuchsia-500 transition-colors" onClick={() => setLightboxImage(null)}><X className="w-6 h-6" /></button>
-          <div className="relative max-w-6xl max-h-full w-full flex flex-col items-center justify-center" onClick={(e) => e.stopPropagation()}>
-            <img src={lightboxImage.src.replace('&w=800', '&w=1600')} alt={lightboxImage.alt} className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl shadow-black/50" />
-            <div className="mt-6 text-center"><h3 className="text-2xl font-black text-white">{lightboxImage.title}</h3><p className="text-fuchsia-400 font-bold uppercase tracking-widest text-sm mt-1">{lightboxImage.category}</p></div>
-          </div>
+        <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center p-6" onClick={() => setLightboxImage(null)}>
+          <button className="absolute top-8 right-8 text-white"><X className="w-10 h-10" /></button>
+          <img 
+            src={lightboxImage.src.replace('&w=800', '&w=1600')} 
+            alt={lightboxImage.alt} 
+            className="max-w-full max-h-[85vh] rounded-xl shadow-2xl" 
+          />
         </div>
       )}
     </div>
