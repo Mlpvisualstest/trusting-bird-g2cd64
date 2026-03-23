@@ -1,7 +1,22 @@
 import { useState, useEffect } from 'react';
-import { Camera, X, Menu, ChevronRight, MapPin, Sparkles } from 'lucide-react';
+import { Camera, X, Menu, ChevronRight, MapPin, Sparkles, CheckCircle2 } from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, User } from 'firebase/auth';
+import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
-// Custom Social Icons to avoid library version errors
+// --- Firebase Configuration ---
+// These globals are provided by the environment. 
+// For your live Vercel site, you would typically set these in Vercel Environment Variables.
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+  ? JSON.parse(__firebase_config) 
+  : { apiKey: "preview-only", authDomain: "preview-only", projectId: "preview-only" };
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'mlpvisuals-portfolio';
+
+// Custom Social Icons
 const InstagramIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
 );
@@ -36,15 +51,39 @@ const PORTFOLIO_IMAGES: PortfolioImage[] = [
 const CATEGORIES: string[] = ['All', 'Portrait', 'Nature', 'Urban', 'Wedding'];
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
   const [activeCategory, setActiveCategory] = useState<string>('All');
   const [lightboxImage, setLightboxImage] = useState<PortfolioImage | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [scrolled, setScrolled] = useState<boolean>(false);
+  
+  // Form State
   const [bookingService, setBookingService] = useState<string>('');
   const [visionText, setVisionText] = useState<string>('');
   const [isGeneratingVision, setIsGeneratingVision] = useState<boolean>(false);
   const [visionError, setVisionError] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formSubmitted, setFormSubmitted] = useState(false);
 
+  // Initialize Auth
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (error) {
+        console.error("Auth error:", error);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  // AI Feature: Enhance vision using Gemini API
   const enhanceVisionWithAI = async () => {
     if (!visionText || !bookingService) return;
     setIsGeneratingVision(true);
@@ -67,7 +106,7 @@ export default function App() {
       return response.json();
     };
 
-    const delays = [1000, 2000, 4000, 8000, 16000];
+    const delays = [1000, 2000, 4000];
     let success = false;
     let data: any;
 
@@ -77,9 +116,7 @@ export default function App() {
         success = true;
         break;
       } catch (err) {
-        if (i < delays.length - 1) {
-          await new Promise(res => setTimeout(res, delays[i]));
-        }
+        if (i < delays.length - 1) await new Promise(res => setTimeout(res, delays[i]));
       }
     }
 
@@ -89,6 +126,37 @@ export default function App() {
       setVisionError("AI is currently unavailable. Please try again later.");
     }
     setIsGeneratingVision(false);
+  };
+
+  const handleBookingSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!user) return;
+    setIsSubmitting(true);
+
+    const formData = new FormData(e.currentTarget);
+    const bookingData = {
+      name: formData.get('name'),
+      email: formData.get('email'),
+      date: formData.get('date'),
+      time: formData.get('time'),
+      service: bookingService,
+      vision: visionText,
+      createdAt: serverTimestamp(),
+      status: 'pending'
+    };
+
+    try {
+      // Rule 1: Always use the specific path /artifacts/{appId}/public/data/{collectionName}
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'bookings'), bookingData);
+      setFormSubmitted(true);
+      setVisionText('');
+      setBookingService('');
+    } catch (error) {
+      console.error("Error submitting booking:", error);
+      setVisionError("Failed to submit. Please check your connection.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   useEffect(() => {
@@ -207,27 +275,87 @@ export default function App() {
       <section id="contact" className="py-32 px-4 md:px-8 max-w-4xl mx-auto">
         <div className="bg-zinc-900 border border-white/5 rounded-[3rem] p-8 md:p-16 relative overflow-hidden shadow-2xl">
           <div className="absolute top-0 right-0 w-64 h-64 bg-fuchsia-500/20 rounded-full mix-blend-screen filter blur-[80px]"></div>
-          <div className="relative z-10 text-center mb-12"><h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-4">Ready to create?</h2><p className="text-zinc-400 text-lg">Select your preferred service and timing below.</p></div>
-          <form className="relative z-10 space-y-6" onSubmit={(e) => e.preventDefault()}>
-            <div className="space-y-3">
-              <label className="text-sm font-bold text-zinc-400 ml-2 uppercase tracking-widest">1. Choose Type of Service <span className="text-fuchsia-400">*</span></label>
-              <div className="flex flex-wrap gap-3">
-                {['Portrait', 'Wedding', 'Urban/Editorial', 'Commercial'].map(s => (
-                  <button key={s} type="button" onClick={() => setBookingService(s)} className={`px-5 py-3 rounded-2xl text-sm font-bold transition-all ${bookingService === s ? 'bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white shadow-lg' : 'bg-zinc-950 border border-white/10 text-zinc-400 hover:text-white'}`}>{s}</button>
-                ))}
-              </div>
+          
+          {formSubmitted ? (
+            <div className="relative z-10 py-20 text-center flex flex-col items-center gap-6 animate-in fade-in zoom-in duration-500">
+               <div className="w-20 h-20 bg-fuchsia-500/20 rounded-full flex items-center justify-center">
+                 <CheckCircle2 className="w-10 h-10 text-fuchsia-400" />
+               </div>
+               <h2 className="text-4xl font-black tracking-tighter">Booking Sent!</h2>
+               <p className="text-zinc-400 text-lg max-w-xs">Thanks for reaching out. I'll review your vision and get back to you within 24 hours.</p>
+               <button 
+                 onClick={() => setFormSubmitted(false)}
+                 className="mt-4 text-sm font-bold text-fuchsia-400 hover:text-fuchsia-300 underline underline-offset-4"
+               >
+                 Send another request
+               </button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><input type="text" placeholder="Name" className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white focus:border-fuchsia-500 outline-none transition-all" required /><input type="email" placeholder="Email" className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white focus:border-fuchsia-500 outline-none transition-all" required /></div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6"><input type="date" className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white [color-scheme:dark] outline-none focus:border-fuchsia-500 transition-all" required /><input type="time" className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white [color-scheme:dark] outline-none focus:border-fuchsia-500 transition-all" required /></div>
-            <div className="space-y-2 relative">
-              <label className="text-sm font-bold text-zinc-400 ml-2 flex justify-between items-center uppercase tracking-widest"><span>Vision & Details</span>{visionError && <span className="text-red-400 text-xs normal-case">{visionError}</span>}</label>
-              <div className="relative">
-                <textarea value={visionText} onChange={(e) => setVisionText(e.target.value)} rows={4} className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white placeholder:text-zinc-600 focus:border-fuchsia-500 outline-none resize-none pb-14 transition-all" placeholder="Briefly describe your vision..."></textarea>
-                {visionText.length > 3 && bookingService && (<button type="button" onClick={enhanceVisionWithAI} disabled={isGeneratingVision} className="absolute bottom-4 right-4 text-xs font-bold px-4 py-2 rounded-full bg-zinc-800 text-fuchsia-300 border border-fuchsia-500/30 flex items-center gap-2 hover:bg-fuchsia-500/20 transition-all shadow-lg hover:shadow-fuchsia-500/20"><Sparkles className={`w-3.5 h-3.5 ${isGeneratingVision ? 'animate-spin' : ''}`} />{isGeneratingVision ? 'Enhancing...' : 'Enhance with AI'}</button>)}
+          ) : (
+            <>
+              <div className="relative z-10 text-center mb-12">
+                <h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-4">Ready to create?</h2>
+                <p className="text-zinc-400 text-lg">Select your preferred service and timing below.</p>
               </div>
-            </div>
-            <button type="submit" className={`w-full font-black text-lg py-5 rounded-2xl transition-all ${bookingService ? 'bg-gradient-to-r from-fuchsia-500 to-violet-600 text-white hover:shadow-xl hover:-translate-y-1' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'}`} disabled={!bookingService}>{bookingService ? 'Request Booking' : 'Select a Service to Continue'}</button>
-          </form>
+              <form className="relative z-10 space-y-6" onSubmit={handleBookingSubmit}>
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-zinc-400 ml-2 uppercase tracking-widest">1. Choose Type of Service <span className="text-fuchsia-400">*</span></label>
+                  <div className="flex flex-wrap gap-3">
+                    {['Portrait', 'Wedding', 'Urban/Editorial', 'Commercial'].map(s => (
+                      <button 
+                        key={s} 
+                        type="button" 
+                        onClick={() => setBookingService(s)} 
+                        className={`px-5 py-3 rounded-2xl text-sm font-bold transition-all ${bookingService === s ? 'bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white shadow-lg' : 'bg-zinc-950 border border-white/10 text-zinc-400 hover:text-white'}`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <input name="name" type="text" placeholder="Name" className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white focus:border-fuchsia-500 outline-none transition-all" required />
+                  <input name="email" type="email" placeholder="Email" className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white focus:border-fuchsia-500 outline-none transition-all" required />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <input name="date" type="date" className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white [color-scheme:dark] outline-none focus:border-fuchsia-500 transition-all" required />
+                  <input name="time" type="time" className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white [color-scheme:dark] outline-none focus:border-fuchsia-500 transition-all" required />
+                </div>
+                <div className="space-y-2 relative">
+                  <label className="text-sm font-bold text-zinc-400 ml-2 flex justify-between items-center uppercase tracking-widest">
+                    <span>Vision & Details</span>
+                    {visionError && <span className="text-red-400 text-xs normal-case">{visionError}</span>}
+                  </label>
+                  <div className="relative">
+                    <textarea 
+                      value={visionText} 
+                      onChange={(e) => setVisionText(e.target.value)} 
+                      rows={4} 
+                      className="w-full bg-zinc-950 border border-white/10 rounded-2xl px-6 py-4 text-white placeholder:text-zinc-600 focus:border-fuchsia-500 outline-none resize-none pb-14 transition-all" 
+                      placeholder="Briefly describe your vision for the shoot..."
+                    ></textarea>
+                    {visionText.length > 3 && bookingService && (
+                      <button 
+                        type="button" 
+                        onClick={enhanceVisionWithAI} 
+                        disabled={isGeneratingVision} 
+                        className="absolute bottom-4 right-4 text-xs font-bold px-4 py-2 rounded-full bg-zinc-800 text-fuchsia-300 border border-fuchsia-500/30 flex items-center gap-2 hover:bg-fuchsia-500/20 transition-all shadow-lg hover:shadow-fuchsia-500/20"
+                      >
+                        <Sparkles className={`w-3.5 h-3.5 ${isGeneratingVision ? 'animate-spin' : ''}`} />
+                        {isGeneratingVision ? 'Enhancing...' : 'Enhance with AI'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <button 
+                  type="submit" 
+                  disabled={!bookingService || isSubmitting}
+                  className={`w-full font-black text-lg py-5 rounded-2xl transition-all ${bookingService ? 'bg-gradient-to-r from-fuchsia-500 to-violet-600 text-white hover:shadow-xl hover:-translate-y-1 shadow-fuchsia-500/20' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'}`}
+                >
+                  {isSubmitting ? 'Sending Request...' : bookingService ? 'Request Booking' : 'Select a Service to Continue'}
+                </button>
+              </form>
+            </>
+          )}
         </div>
       </section>
 
@@ -245,7 +373,7 @@ export default function App() {
 
       {lightboxImage && (
         <div className="fixed inset-0 z-[100] bg-zinc-950/95 backdrop-blur-xl flex items-center justify-center p-4" onClick={() => setLightboxImage(null)}>
-          <button className="absolute top-6 right-6 w-12 h-12 bg-white/10 rounded-full flex items-center justify-center text-white" onClick={() => setLightboxImage(null)}><X className="w-6 h-6" /></button>
+          <button className="absolute top-6 right-6 w-12 h-12 bg-white/10 rounded-full flex items-center justify-center text-white hover:bg-fuchsia-500 transition-colors" onClick={() => setLightboxImage(null)}><X className="w-6 h-6" /></button>
           <div className="relative max-w-6xl max-h-full w-full flex flex-col items-center justify-center" onClick={(e) => e.stopPropagation()}>
             <img src={lightboxImage.src.replace('&w=800', '&w=1600')} alt={lightboxImage.alt} className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl shadow-black/50" />
             <div className="mt-6 text-center"><h3 className="text-2xl font-black text-white">{lightboxImage.title}</h3><p className="text-fuchsia-400 font-bold uppercase tracking-widest text-sm mt-1">{lightboxImage.category}</p></div>
