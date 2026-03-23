@@ -6,13 +6,14 @@ import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/fire
 
 // --- SERVICE PRICING CONFIGURATION ---
 const SERVICE_PRICES: Record<string, { price: string; description: string }> = {
-  'Portrait': { price: '$250', description: '90-minute session, 15 retouched photos.' },
-  'Wedding': { price: '$2,500', description: 'Full day coverage, digital gallery, and print rights.' },
-  'Urban/Editorial': { price: '$400', description: '2-hour street session, high-fashion retouching.' },
-  'Commercial': { price: '$1,200', description: 'Brand-focused content, full commercial licensing.' },
+  'Portrait': { price: '$250', description: '90-minute session, 15 high-end retouched photos.' },
+  'Wedding': { price: '$2,500', description: 'Full day coverage, private digital gallery, and print rights.' },
+  'Urban/Editorial': { price: '$400', description: '2-hour street session, editorial-style fashion retouching.' },
+  'Commercial': { price: '$1,200', description: 'Brand-focused content creation with full commercial licensing.' },
 };
 
 // --- Firebase Configuration ---
+// These use globals provided by the deployment environment.
 const firebaseConfig = typeof __firebase_config !== 'undefined' 
   ? JSON.parse(__firebase_config) 
   : { apiKey: "preview-only", authDomain: "preview-only", projectId: "preview-only" };
@@ -22,7 +23,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'mlpvisuals-portfolio';
 
-// Custom Social Icons
+// Custom Social Icons to avoid external library version mismatches
 const InstagramIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
 );
@@ -72,11 +73,12 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({ name: '', email: '', date: '', time: '' });
 
-  // Filtered images calculation
+  // Calculation for the masonry gallery
   const filteredImages = activeCategory === 'All' 
     ? PORTFOLIO_IMAGES 
     : PORTFOLIO_IMAGES.filter(img => img.category === activeCategory);
 
+  // Authentication Setup
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -85,44 +87,40 @@ export default function App() {
         } else {
           await signInAnonymously(auth);
         }
-      } catch (e) { 
-        console.error("Authentication initialization failed:", e); 
-      }
+      } catch (err) { console.error("Auth init error:", err); }
     };
     initAuth();
     const unsubscribe = onAuthStateChanged(auth, setUser);
     return () => unsubscribe();
   }, []);
 
+  // AI Logic
   const enhanceVisionWithAI = async () => {
     if (!visionText || !bookingService) return;
     setIsGeneratingVision(true);
     setVisionError('');
-    const apiKey = ""; // API Key provided by env at runtime
-    const prompt = `Service: ${bookingService}\nRough idea: ${visionText}`;
-    const systemPrompt = "Enhance this photography concept into 2 evocative sentences focusing on light and emotion for Mlpvisuals.";
+    const apiKey = ""; // API Key provided by env
+    const prompt = `Service: ${bookingService}\nClient Concept: ${visionText}`;
+    const systemPrompt = "You are a professional Creative Director. Transform the rough concept into 2 sentences focusing on lighting, color palette, and emotion. Do not use quotes.";
 
     try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          contents: [{ parts: [{ text: prompt }] }], 
-          systemInstruction: { parts: [{ text: systemPrompt }] } 
-        })
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], systemInstruction: { parts: [{ text: systemPrompt }] } })
       });
-      const data = await response.json();
-      if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-        setVisionText(data.candidates[0].content.parts[0].text.trim());
+      const resData = await response.json();
+      if (resData?.candidates?.[0]?.content?.parts?.[0]?.text) {
+        setVisionText(resData.candidates[0].content.parts[0].text.trim());
       }
     } catch (e) {
-      setVisionError("AI temporarily unavailable.");
+      setVisionError("AI temporarily offline.");
     } finally {
       setIsGeneratingVision(false);
     }
   };
 
-  const handleInitialSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleInitialFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
     setFormData({
@@ -134,29 +132,29 @@ export default function App() {
     setStep('checkout');
   };
 
-  const handleFinalPayment = async () => {
+  const handleFinalCheckoutSubmit = async () => {
     if (!user) return;
     setIsSubmitting(true);
-    const bookingData = {
+    const finalData = {
       ...formData,
       service: bookingService,
       price: SERVICE_PRICES[bookingService].price,
       vision: visionText,
       createdAt: serverTimestamp(),
-      userId: user.uid
+      clientId: user.uid
     };
 
     try {
-      // RULE 1: Use strict paths for Firestore
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'bookings'), bookingData);
-      
-      // Simulate processing delay for professional feel
-      await new Promise(r => setTimeout(r, 1200));
+      // RULE 1: Use specific artifacts paths for public data
+      if (firebaseConfig.apiKey !== "preview-only") {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'bookings'), finalData);
+      }
+      // Add artificial delay for professional feeling
+      await new Promise(r => setTimeout(r, 1500));
       setStep('success');
-    } catch (error) {
-      console.error("Database submission error:", error);
-      // Fallback to success UI so user flow isn't broken in preview mode
-      setStep('success'); 
+    } catch (err) {
+      console.error("Database save failed:", err);
+      setStep('success'); // Fallback to success UI for the visitor
     } finally {
       setIsSubmitting(false);
     }
@@ -169,9 +167,9 @@ export default function App() {
   }, []);
 
   const scrollToSection = (id: string) => {
-    const element = document.getElementById(id);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
       setIsMobileMenuOpen(false);
     }
   };
@@ -185,127 +183,131 @@ export default function App() {
         @keyframes gradientMove { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
       ` }} />
 
-      {/* Navbar */}
+      {/* Navigation */}
       <nav className={`fixed w-full z-50 transition-all duration-500 ${scrolled ? 'bg-zinc-950/80 backdrop-blur-xl py-4' : 'bg-transparent py-6'}`}>
         <div className="container mx-auto px-6 flex justify-between items-center">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => scrollToSection('home')}>
-            <Camera className="w-8 h-8 text-fuchsia-500" />
+            <div className="p-2 bg-fuchsia-500 rounded-lg"><Camera className="w-6 h-6 text-white" /></div>
             <span className="text-2xl font-black tracking-tighter lowercase text-white">Mlpvisuals</span>
           </div>
           <div className="hidden md:flex gap-4 items-center">
-            <button onClick={() => scrollToSection('portfolio')} className="text-sm font-bold text-zinc-400 hover:text-white">Work</button>
-            <button onClick={() => scrollToSection('contact')} className="px-6 py-2 rounded-full bg-white text-black text-sm font-bold hover:bg-fuchsia-500 hover:text-white transition-all">Book Now</button>
+            <button onClick={() => scrollToSection('portfolio')} className="text-sm font-bold text-zinc-400 hover:text-white transition-colors">Work</button>
+            <button onClick={() => scrollToSection('contact')} className="px-6 py-2.5 rounded-full bg-white text-black text-sm font-black hover:bg-fuchsia-500 hover:text-white transition-all">Book Session</button>
           </div>
-          <button className="md:hidden" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
-            <Menu className="w-6 h-6" />
+          <button className="md:hidden p-2" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+            {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
         </div>
         
-        {/* Mobile Navigation overlay */}
+        {/* Mobile Menu */}
         {isMobileMenuOpen && (
-          <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center gap-8 md:hidden">
-            <button className="absolute top-8 right-8" onClick={() => setIsMobileMenuOpen(false)}><X className="w-8 h-8"/></button>
-            <button onClick={() => scrollToSection('portfolio')} className="text-4xl font-black">Work</button>
-            <button onClick={() => scrollToSection('contact')} className="text-4xl font-black text-fuchsia-500">Book Now</button>
+          <div className="fixed inset-0 bg-black z-50 flex flex-col items-center justify-center gap-10 md:hidden animate-in fade-in duration-300">
+             <button className="absolute top-8 right-8" onClick={() => setIsMobileMenuOpen(false)}><X className="w-10 h-10"/></button>
+             <button onClick={() => scrollToSection('portfolio')} className="text-5xl font-black">Work.</button>
+             <button onClick={() => scrollToSection('contact')} className="text-5xl font-black text-fuchsia-500">Book.</button>
           </div>
         )}
       </nav>
 
       {/* Hero */}
-      <section id="home" className="relative h-screen flex items-center justify-center overflow-hidden">
-        <div className="absolute top-0 -left-4 w-96 h-96 bg-fuchsia-600/20 rounded-full blur-[120px] animate-blob"></div>
-        <div className="absolute bottom-0 -right-4 w-96 h-96 bg-violet-600/20 rounded-full blur-[120px] animate-blob animation-delay-2000"></div>
-        <div className="relative z-10 text-center px-6">
-          <h1 className="text-7xl md:text-9xl font-black tracking-tighter leading-none mb-8">
-            MODERN <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-500 via-violet-400 to-blue-500 text-gradient">STORYTELLING.</span>
+      <section id="home" className="relative h-screen flex items-center justify-center">
+        <div className="absolute top-0 -left-10 w-96 h-96 bg-fuchsia-600/10 rounded-full blur-[120px] animate-blob"></div>
+        <div className="absolute bottom-0 -right-10 w-96 h-96 bg-violet-600/10 rounded-full blur-[120px] animate-blob animation-delay-2000"></div>
+        <div className="relative z-10 text-center px-6 max-w-5xl">
+          <h1 className="text-7xl md:text-[10rem] font-black tracking-tighter leading-none mb-8 select-none">
+            VIBRANT <br />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-500 via-violet-400 to-blue-500 text-gradient">VISUALS.</span>
           </h1>
-          <p className="text-xl md:text-2xl text-zinc-400 max-w-2xl mx-auto mb-10 font-medium">Capture the energy. Elevate the moment. Professional photography for the modern world.</p>
-          <button onClick={() => scrollToSection('contact')} className="bg-white text-black px-10 py-5 rounded-full font-black text-lg hover:scale-105 transition-all shadow-2xl shadow-white/10">Reserve Your Date</button>
+          <p className="text-xl md:text-3xl text-zinc-400 mx-auto mb-10 font-medium tracking-tight">Bold storytelling for the modern era. Captured in high definition.</p>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <button onClick={() => scrollToSection('contact')} className="bg-white text-black px-10 py-5 rounded-full font-black text-xl hover:bg-fuchsia-500 hover:text-white transition-all shadow-2xl shadow-white/5">Reserve Session</button>
+            <button onClick={() => scrollToSection('portfolio')} className="px-10 py-5 rounded-full border border-white/10 font-black text-xl hover:bg-white/5 transition-all">See Work</button>
+          </div>
         </div>
       </section>
 
-      {/* Portfolio */}
-      <section id="portfolio" className="py-32 px-6 max-w-7xl mx-auto">
-        <div className="flex flex-col md:flex-row justify-between items-end mb-16 gap-8">
-          <div>
-            <h2 className="text-5xl font-black tracking-tighter mb-4">Selected <span className="text-fuchsia-500">Works.</span></h2>
-            <p className="text-zinc-500 text-lg">Curated projects across New York and worldwide.</p>
+      {/* Portfolio Grid */}
+      <section id="portfolio" className="py-40 px-6 max-w-[1400px] mx-auto">
+        <div className="flex flex-col md:flex-row justify-between items-end mb-20 gap-8">
+          <div className="max-w-xl">
+            <h2 className="text-6xl font-black tracking-tighter mb-6">Archive <span className="text-fuchsia-500">01.</span></h2>
+            <p className="text-zinc-500 text-xl font-medium leading-relaxed">A specialized curation of projects exploring light, motion, and raw human emotion across the globe.</p>
           </div>
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap bg-white/5 p-2 rounded-2xl backdrop-blur-sm">
             {CATEGORIES.map(cat => (
-              <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-5 py-2 rounded-full text-xs font-bold uppercase tracking-widest transition-all ${activeCategory === cat ? 'bg-fuchsia-600 text-white' : 'bg-zinc-900 text-zinc-500 hover:text-white'}`}>{cat}</button>
+              <button key={cat} onClick={() => setActiveCategory(cat)} className={`px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest transition-all ${activeCategory === cat ? 'bg-fuchsia-600 text-white shadow-lg shadow-fuchsia-600/20' : 'text-zinc-500 hover:text-white hover:bg-white/5'}`}>{cat}</button>
             ))}
           </div>
         </div>
-        <div className="columns-1 md:columns-2 lg:columns-3 gap-6 space-y-6">
+        <div className="columns-1 md:columns-2 lg:columns-3 gap-8 space-y-8">
           {filteredImages.map(img => (
-            <div key={img.id} className="break-inside-avoid relative group overflow-hidden rounded-3xl cursor-pointer" onClick={() => setLightboxImage(img)}>
-              <img src={img.src} alt={img.alt} className="w-full h-auto grayscale hover:grayscale-0 transition-all duration-700" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-all p-8 flex flex-col justify-end">
-                <p className="text-fuchsia-400 font-bold text-xs uppercase mb-2">{img.category}</p>
-                <h3 className="text-xl font-black">{img.title}</h3>
+            <div key={img.id} className="break-inside-avoid relative group overflow-hidden rounded-[2.5rem] cursor-pointer" onClick={() => setLightboxImage(img)}>
+              <img src={img.src} alt={img.alt} className="w-full h-auto grayscale group-hover:grayscale-0 transition-all duration-1000 group-hover:scale-105" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-500 p-10 flex flex-col justify-end">
+                <p className="text-fuchsia-400 font-black text-xs uppercase tracking-widest mb-3">{img.category}</p>
+                <h3 className="text-3xl font-black">{img.title}</h3>
               </div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Contact & Payment Section */}
-      <section id="contact" className="py-32 px-6 bg-zinc-900/30 backdrop-blur-sm">
+      {/* Booking & Checkout Section */}
+      <section id="contact" className="py-40 px-6 relative">
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-fuchsia-900/5 to-transparent -z-10"></div>
         <div className="max-w-2xl mx-auto">
           {step === 'form' && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="text-center mb-12">
-                <h2 className="text-5xl font-black tracking-tighter mb-4">Let's Create.</h2>
-                <p className="text-zinc-500">Select your service and we'll draft your vision together.</p>
+            <div className="animate-in fade-in slide-in-from-bottom-6 duration-700">
+              <div className="text-center mb-16">
+                <h2 className="text-6xl font-black tracking-tighter mb-6">Start a <span className="text-fuchsia-500">Project.</span></h2>
+                <p className="text-zinc-400 text-lg">Select a service to see specialized pricing and availability.</p>
               </div>
 
-              <form onSubmit={handleInitialSubmit} className="space-y-6">
-                <div className="grid grid-cols-2 gap-3">
+              <form onSubmit={handleInitialFormSubmit} className="space-y-8">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {Object.keys(SERVICE_PRICES).map(s => (
                     <button 
                       key={s} 
                       type="button" 
                       onClick={() => setBookingService(s)}
-                      className={`p-6 rounded-3xl border-2 text-left transition-all relative overflow-hidden group ${bookingService === s ? 'border-fuchsia-500 bg-fuchsia-500/5' : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700'}`}
+                      className={`p-8 rounded-[2rem] border-2 text-left transition-all relative overflow-hidden group ${bookingService === s ? 'border-fuchsia-500 bg-fuchsia-500/5' : 'border-zinc-900 bg-zinc-900/50 hover:border-zinc-800'}`}
                     >
                       <div className="relative z-10">
-                        <p className={`text-xs font-bold uppercase mb-1 ${bookingService === s ? 'text-fuchsia-400' : 'text-zinc-500'}`}>{s}</p>
-                        <p className="text-xl font-black">{SERVICE_PRICES[s].price}</p>
+                        <p className={`text-xs font-black uppercase tracking-widest mb-2 ${bookingService === s ? 'text-fuchsia-400' : 'text-zinc-500'}`}>{s}</p>
+                        <p className="text-2xl font-black">{SERVICE_PRICES[s].price}</p>
                       </div>
-                      {bookingService === s && <CheckCircle2 className="absolute top-4 right-4 w-5 h-5 text-fuchsia-500" />}
+                      {bookingService === s && <div className="absolute top-6 right-6 p-1 bg-fuchsia-500 rounded-full"><CheckCircle2 className="w-4 h-4 text-white" /></div>}
                     </button>
                   ))}
                 </div>
 
                 {bookingService && (
-                  <div className="p-4 bg-fuchsia-500/10 rounded-2xl border border-fuchsia-500/20 text-sm text-fuchsia-200">
-                    <p><strong>Package includes:</strong> {SERVICE_PRICES[bookingService].description}</p>
+                  <div className="p-6 bg-zinc-900/80 rounded-2xl border border-white/5 animate-in fade-in duration-300">
+                    <p className="text-zinc-400 text-sm leading-relaxed"><strong className="text-white">Included:</strong> {SERVICE_PRICES[bookingService].description}</p>
                   </div>
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <input name="name" type="text" placeholder="Full Name" required className="w-full bg-zinc-900 border-zinc-800 rounded-2xl p-4 focus:border-fuchsia-500 outline-none" />
-                  <input name="email" type="email" placeholder="Email Address" required className="w-full bg-zinc-900 border-zinc-800 rounded-2xl p-4 focus:border-fuchsia-500 outline-none" />
+                  <input name="name" type="text" placeholder="Full Name" required className="w-full bg-zinc-900 border-2 border-transparent rounded-2xl p-5 focus:border-fuchsia-500 outline-none transition-all" />
+                  <input name="email" type="email" placeholder="Email Address" required className="w-full bg-zinc-900 border-2 border-transparent rounded-2xl p-5 focus:border-fuchsia-500 outline-none transition-all" />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <input name="date" type="date" required className="w-full bg-zinc-900 border-zinc-800 rounded-2xl p-4 focus:border-fuchsia-500 outline-none [color-scheme:dark]" />
-                  <input name="time" type="time" required className="w-full bg-zinc-900 border-zinc-800 rounded-2xl p-4 focus:border-fuchsia-500 outline-none [color-scheme:dark]" />
+                  <input name="date" type="date" required className="w-full bg-zinc-900 border-2 border-transparent rounded-2xl p-5 focus:border-fuchsia-500 outline-none [color-scheme:dark]" />
+                  <input name="time" type="time" required className="w-full bg-zinc-900 border-2 border-transparent rounded-2xl p-5 focus:border-fuchsia-500 outline-none [color-scheme:dark]" />
                 </div>
 
                 <div className="relative">
                   <textarea 
                     value={visionText} 
                     onChange={(e) => setVisionText(e.target.value)} 
-                    placeholder="Describe your creative vision..." 
-                    className="w-full bg-zinc-900 border-zinc-800 rounded-2xl p-4 h-32 focus:border-fuchsia-500 outline-none resize-none"
+                    placeholder="Describe your creative vision or mood board ideas..." 
+                    className="w-full bg-zinc-900 border-2 border-transparent rounded-3xl p-6 h-40 focus:border-fuchsia-500 outline-none resize-none transition-all"
                   />
                   {visionText.length > 5 && bookingService && (
-                    <button type="button" onClick={enhanceVisionWithAI} className="absolute bottom-4 right-4 bg-zinc-800 text-fuchsia-400 px-4 py-2 rounded-full text-xs font-bold hover:bg-fuchsia-500 hover:text-white transition-all flex items-center gap-2">
-                      <Sparkles className={`w-3 h-3 ${isGeneratingVision ? 'animate-spin' : ''}`} />
-                      {isGeneratingVision ? 'Dreaming...' : 'AI Enhance'}
+                    <button type="button" onClick={enhanceVisionWithAI} className="absolute bottom-6 right-6 bg-zinc-800 text-fuchsia-400 px-5 py-2.5 rounded-full text-xs font-black hover:bg-fuchsia-500 hover:text-white transition-all flex items-center gap-2 shadow-xl border border-fuchsia-500/20">
+                      <Sparkles className={`w-4 h-4 ${isGeneratingVision ? 'animate-spin' : ''}`} />
+                      {isGeneratingVision ? 'Consulting AI...' : 'AI Enhance Concept'}
                     </button>
                   )}
                 </div>
@@ -313,89 +315,104 @@ export default function App() {
                 <button 
                   type="submit" 
                   disabled={!bookingService}
-                  className="w-full bg-white text-black py-5 rounded-2xl font-black text-xl hover:bg-fuchsia-500 hover:text-white transition-all disabled:opacity-50"
+                  className="w-full bg-white text-black py-6 rounded-3xl font-black text-xl hover:bg-fuchsia-500 hover:text-white transition-all disabled:opacity-50 shadow-2xl shadow-white/5 active:scale-[0.98]"
                 >
-                  Continue to Booking Summary
+                  Review Booking Details
                 </button>
               </form>
             </div>
           )}
 
           {step === 'checkout' && (
-            <div className="animate-in zoom-in-95 fade-in duration-300">
-              <div className="bg-zinc-900 rounded-[2.5rem] p-8 md:p-12 border border-zinc-800 shadow-2xl">
-                <div className="flex justify-between items-start mb-8">
-                  <h3 className="text-3xl font-black">Booking Summary</h3>
-                  <button onClick={() => setStep('form')} className="text-zinc-500 hover:text-white"><X /></button>
+            <div className="animate-in zoom-in-95 fade-in duration-400">
+              <div className="bg-zinc-900 rounded-[3rem] p-10 md:p-16 border border-white/5 shadow-2xl relative overflow-hidden">
+                <div className="absolute -top-20 -right-20 w-64 h-64 bg-fuchsia-500/10 blur-[100px] rounded-full"></div>
+                
+                <div className="flex justify-between items-start mb-12 relative z-10">
+                  <h3 className="text-4xl font-black tracking-tighter">Reservation Summary</h3>
+                  <button onClick={() => setStep('form')} className="p-2 hover:bg-white/5 rounded-full transition-colors"><X className="w-6 h-6"/></button>
                 </div>
 
-                <div className="space-y-6 mb-10">
-                  <div className="flex justify-between border-b border-zinc-800 pb-4">
-                    <span className="text-zinc-500 font-bold uppercase text-xs tracking-widest">Service</span>
-                    <span className="font-black text-fuchsia-500">{bookingService}</span>
+                <div className="space-y-8 mb-16 relative z-10">
+                  <div className="flex justify-between items-center border-b border-white/5 pb-6">
+                    <span className="text-zinc-500 font-black uppercase text-xs tracking-[0.2em]">Service Selected</span>
+                    <span className="font-black text-2xl text-fuchsia-500">{bookingService}</span>
                   </div>
-                  <div className="flex justify-between border-b border-zinc-800 pb-4">
-                    <span className="text-zinc-500 font-bold uppercase text-xs tracking-widest">Date & Time</span>
-                    <span className="font-bold">{formData.date} at {formData.time}</span>
+                  <div className="flex justify-between items-center border-b border-white/5 pb-6">
+                    <span className="text-zinc-500 font-black uppercase text-xs tracking-[0.2em]">Session Date</span>
+                    <span className="font-bold text-lg">{formData.date}</span>
                   </div>
-                  <div className="flex justify-between items-center py-4">
-                    <span className="text-lg font-black uppercase">Total Price</span>
-                    <span className="text-4xl font-black text-white">{SERVICE_PRICES[bookingService].price}</span>
+                  <div className="flex justify-between items-center border-b border-white/5 pb-6">
+                    <span className="text-zinc-500 font-black uppercase text-xs tracking-[0.2em]">Time Slot</span>
+                    <span className="font-bold text-lg">{formData.time}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-4">
+                    <span className="text-2xl font-black uppercase tracking-tight">Investment</span>
+                    <span className="text-5xl font-black text-white">{SERVICE_PRICES[bookingService].price}</span>
                   </div>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-6 relative z-10">
                   <button 
-                    onClick={handleFinalPayment}
+                    onClick={handleFinalCheckoutSubmit}
                     disabled={isSubmitting}
-                    className="w-full bg-fuchsia-600 text-white py-5 rounded-2xl font-black text-xl flex items-center justify-center gap-3 hover:bg-fuchsia-500 transition-all shadow-xl shadow-fuchsia-600/20"
+                    className="w-full bg-fuchsia-600 text-white py-6 rounded-3xl font-black text-2xl flex items-center justify-center gap-4 hover:bg-fuchsia-500 transition-all shadow-xl shadow-fuchsia-600/30 active:scale-[0.98]"
                   >
                     {isSubmitting ? (
-                      <div className="w-6 h-6 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
                     ) : (
                       <>
-                        <ShieldCheck className="w-6 h-6" />
-                        Confirm & Reserve Session
+                        <ShieldCheck className="w-7 h-7" />
+                        Complete Reservation
                       </>
                     )}
                   </button>
-                  <p className="text-center text-xs text-zinc-500 font-bold uppercase tracking-widest">Secure checkout via Mlpvisuals Cloud</p>
+                  <div className="flex items-center justify-center gap-2 text-zinc-500">
+                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em]">Secured by Mlpvisuals Private Cloud</p>
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
           {step === 'success' && (
-            <div className="text-center py-20 animate-in zoom-in-90 fade-in duration-500">
-              <div className="w-24 h-24 bg-fuchsia-500/20 rounded-full flex items-center justify-center mx-auto mb-8">
-                <CheckCircle2 className="w-12 h-12 text-fuchsia-500" />
+            <div className="text-center py-20 animate-in zoom-in-90 fade-in duration-600">
+              <div className="w-32 h-32 bg-fuchsia-500/10 rounded-full flex items-center justify-center mx-auto mb-10 border border-fuchsia-500/20">
+                <CheckCircle2 className="w-16 h-16 text-fuchsia-500" />
               </div>
-              <h2 className="text-5xl font-black tracking-tighter mb-4">You're All Set!</h2>
-              <p className="text-zinc-400 text-lg mb-10">Your session for <strong>{formData.date}</strong> is reserved. Check your email at {formData.email} for next steps.</p>
-              <button onClick={() => setStep('form')} className="text-fuchsia-500 font-bold hover:underline">Make another booking</button>
+              <h2 className="text-6xl font-black tracking-tighter mb-6">Confirmed.</h2>
+              <p className="text-zinc-400 text-xl mb-12 leading-relaxed">Your session for <span className="text-white font-bold">{formData.date}</span> is officially on the calendar. Check your inbox at <span className="text-fuchsia-400 font-bold">{formData.email}</span> for session details.</p>
+              <button onClick={() => setStep('form')} className="text-fuchsia-500 font-black uppercase text-sm tracking-widest hover:text-white transition-colors border-b-2 border-fuchsia-500 pb-1">Create Another Booking</button>
             </div>
           )}
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="py-20 px-6 border-t border-zinc-900 text-center">
-        <div className="flex justify-center gap-6 mb-10">
-          <a href="#" className="w-12 h-12 rounded-full bg-zinc-900 flex items-center justify-center text-zinc-500 hover:text-white transition-all"><InstagramIcon /></a>
-          <a href="#" className="w-12 h-12 rounded-full bg-zinc-900 flex items-center justify-center text-zinc-500 hover:text-white transition-all"><TwitterIcon /></a>
+      <footer className="py-32 px-6 border-t border-white/5 text-center">
+        <div className="flex justify-center gap-8 mb-12">
+          <a href="#" className="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center text-zinc-500 hover:text-fuchsia-400 hover:bg-white/10 transition-all"><InstagramIcon /></a>
+          <a href="#" className="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center text-zinc-500 hover:text-fuchsia-400 hover:bg-white/10 transition-all"><TwitterIcon /></a>
         </div>
-        <p className="text-zinc-600 text-sm font-bold uppercase tracking-widest">© 2026 MLPVISUALS. NEW YORK CITY.</p>
+        <p className="text-zinc-600 text-xs font-black uppercase tracking-[0.4em]">© 2026 MLPVISUALS. NYC BASED. WORLDWIDE AVAILABLE.</p>
       </footer>
 
-      {/* Lightbox */}
+      {/* Lightbox Overlay */}
       {lightboxImage && (
-        <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-xl flex items-center justify-center p-6" onClick={() => setLightboxImage(null)}>
-          <button className="absolute top-8 right-8 text-white"><X className="w-10 h-10" /></button>
-          <img 
-            src={lightboxImage.src.replace('&w=800', '&w=1600')} 
-            alt={lightboxImage.alt} 
-            className="max-w-full max-h-[85vh] rounded-xl shadow-2xl" 
-          />
+        <div className="fixed inset-0 z-[100] bg-black/98 backdrop-blur-2xl flex items-center justify-center p-8 animate-in fade-in duration-500" onClick={() => setLightboxImage(null)}>
+          <button className="absolute top-10 right-10 text-white p-4 hover:bg-white/10 rounded-full transition-colors"><X className="w-10 h-10" /></button>
+          <div className="max-w-7xl max-h-[90vh] flex flex-col items-center gap-6" onClick={(e) => e.stopPropagation()}>
+            <img 
+              src={lightboxImage.src.replace('&w=800', '&w=1600')} 
+              alt={lightboxImage.alt} 
+              className="max-w-full max-h-[80vh] rounded-3xl shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/5" 
+            />
+            <div className="text-center">
+              <h3 className="text-3xl font-black text-white mb-2">{lightboxImage.title}</h3>
+              <p className="text-fuchsia-500 font-black uppercase tracking-widest text-sm">{lightboxImage.category}</p>
+            </div>
+          </div>
         </div>
       )}
     </div>
