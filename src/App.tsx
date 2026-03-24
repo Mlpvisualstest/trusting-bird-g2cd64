@@ -82,7 +82,6 @@ export default function App() {
   const [bookingService, setBookingService] = useState<string>('');
   const [visionText, setVisionText] = useState<string>('');
   const [isGeneratingVision, setIsGeneratingVision] = useState<boolean>(false);
-  const [visionError, setVisionError] = useState<string>('');
   const [step, setStep] = useState<'form' | 'checkout' | 'success'>('form');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({ name: '', email: '', date: '', time: '' });
@@ -113,7 +112,6 @@ export default function App() {
   const enhanceVisionWithAI = async () => {
     if (!visionText || !bookingService) return;
     setIsGeneratingVision(true);
-    setVisionError('');
     const apiKey = ""; // API Key provided by env
     const prompt = `Service: ${bookingService}\nClient Concept: ${visionText}`;
     const systemPrompt = "You are a professional Creative Director. Transform the rough concept into 2 sentences focusing on lighting, color palette, and emotion. Do not use quotes.";
@@ -129,7 +127,7 @@ export default function App() {
         setVisionText(resData.candidates[0].content.parts[0].text.trim());
       }
     } catch (e) {
-      setVisionError("AI temporarily offline.");
+      console.error("AI expansion failed", e);
     } finally {
       setIsGeneratingVision(false);
     }
