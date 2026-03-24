@@ -1,8 +1,17 @@
 import { useState, useEffect } from 'react';
-import { Camera, X, Menu, ChevronRight, MapPin, Sparkles, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { Camera, X, Menu, Sparkles, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, User } from 'firebase/auth';
 import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+
+// Declare globals for TypeScript compiler
+declare global {
+  interface Window {
+    __firebase_config?: string;
+    __app_id?: string;
+    __initial_auth_token?: string;
+  }
+}
 
 // --- SERVICE PRICING CONFIGURATION ---
 const SERVICE_PRICES: Record<string, { price: string; description: string }> = {
@@ -13,15 +22,20 @@ const SERVICE_PRICES: Record<string, { price: string; description: string }> = {
 };
 
 // --- Firebase Configuration ---
-// These use globals provided by the deployment environment.
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
-  ? JSON.parse(__firebase_config) 
-  : { apiKey: "preview-only", authDomain: "preview-only", projectId: "preview-only" };
+const getFirebaseConfig = () => {
+  try {
+    const envConfig = typeof window !== 'undefined' ? window.__firebase_config : undefined;
+    return envConfig ? JSON.parse(envConfig) : { apiKey: "preview-only", authDomain: "preview-only", projectId: "preview-only" };
+  } catch {
+    return { apiKey: "preview-only", authDomain: "preview-only", projectId: "preview-only" };
+  }
+};
 
+const firebaseConfig = getFirebaseConfig();
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'mlpvisuals-portfolio';
+const appId = (typeof window !== 'undefined' && window.__app_id) ? window.__app_id : 'mlpvisuals-portfolio';
 
 // Custom Social Icons to avoid external library version mismatches
 const InstagramIcon = () => (
@@ -82,8 +96,9 @@ export default function App() {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
+        const token = typeof window !== 'undefined' ? window.__initial_auth_token : undefined;
+        if (token) {
+          await signInWithCustomToken(auth, token);
         } else {
           await signInAnonymously(auth);
         }
