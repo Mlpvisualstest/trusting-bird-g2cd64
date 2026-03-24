@@ -4,7 +4,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, User } from 'firebase/auth';
 import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
-// Declare globals for TypeScript compiler
+// Declare globals for TypeScript compiler to prevent "Cannot find name" errors
 declare global {
   interface Window {
     __firebase_config?: string;
