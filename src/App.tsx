@@ -4,7 +4,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, User } from 'firebase/auth';
 import { getFirestore, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
-// Declare globals for TypeScript compiler to prevent "Cannot find name" errors
+// Declare globals for TypeScript compiler
 declare global {
   interface Window {
     __firebase_config?: string;
@@ -37,7 +37,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = (typeof window !== 'undefined' && window.__app_id) ? window.__app_id : 'mlpvisuals-portfolio';
 
-// Custom Social Icons to avoid external library version mismatches
+// Custom Social Icons
 const InstagramIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
 );
@@ -112,9 +112,9 @@ export default function App() {
   const enhanceVisionWithAI = async () => {
     if (!visionText || !bookingService) return;
     setIsGeneratingVision(true);
-    const apiKey = ""; // API Key provided by env
+    const apiKey = ""; 
     const prompt = `Service: ${bookingService}\nClient Concept: ${visionText}`;
-    const systemPrompt = "You are a professional Creative Director. Transform the rough concept into 2 sentences focusing on lighting, color palette, and emotion. Do not use quotes.";
+    const systemPrompt = "Enhance this photography concept into 2 sentences focusing on lighting, color palette, and emotion.";
 
     try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
@@ -127,7 +127,7 @@ export default function App() {
         setVisionText(resData.candidates[0].content.parts[0].text.trim());
       }
     } catch (e) {
-      console.error("AI expansion failed", e);
+      console.error("AI error", e);
     } finally {
       setIsGeneratingVision(false);
     }
@@ -158,16 +158,14 @@ export default function App() {
     };
 
     try {
-      // RULE 1: Use specific artifacts paths for public data
       if (firebaseConfig.apiKey !== "preview-only") {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'bookings'), finalData);
       }
-      // Add artificial delay for professional feeling
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 1200));
       setStep('success');
     } catch (err) {
-      console.error("Database save failed:", err);
-      setStep('success'); // Fallback to success UI for the visitor
+      console.error("Save failed", err);
+      setStep('success'); 
     } finally {
       setIsSubmitting(false);
     }
@@ -196,7 +194,6 @@ export default function App() {
         @keyframes gradientMove { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
       ` }} />
 
-      {/* Navigation */}
       <nav className={`fixed w-full z-50 transition-all duration-500 ${scrolled ? 'bg-zinc-950/80 backdrop-blur-xl py-4' : 'bg-transparent py-6'}`}>
         <div className="container mx-auto px-6 flex justify-between items-center">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => scrollToSection('home')}>
@@ -211,8 +208,6 @@ export default function App() {
             {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
         </div>
-        
-        {/* Mobile Menu */}
         {isMobileMenuOpen && (
           <div className="fixed inset-0 bg-black z-50 flex flex-col items-center justify-center gap-10 md:hidden animate-in fade-in duration-300">
              <button className="absolute top-8 right-8" onClick={() => setIsMobileMenuOpen(false)}><X className="w-10 h-10"/></button>
@@ -222,7 +217,6 @@ export default function App() {
         )}
       </nav>
 
-      {/* Hero */}
       <section id="home" className="relative h-screen flex items-center justify-center">
         <div className="absolute top-0 -left-10 w-96 h-96 bg-fuchsia-600/10 rounded-full blur-[120px] animate-blob"></div>
         <div className="absolute bottom-0 -right-10 w-96 h-96 bg-violet-600/10 rounded-full blur-[120px] animate-blob animation-delay-2000"></div>
@@ -239,7 +233,6 @@ export default function App() {
         </div>
       </section>
 
-      {/* Portfolio Grid */}
       <section id="portfolio" className="py-40 px-6 max-w-[1400px] mx-auto">
         <div className="flex flex-col md:flex-row justify-between items-end mb-20 gap-8">
           <div className="max-w-xl">
@@ -265,7 +258,6 @@ export default function App() {
         </div>
       </section>
 
-      {/* Booking & Checkout Section */}
       <section id="contact" className="py-40 px-6 relative">
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-fuchsia-900/5 to-transparent -z-10"></div>
         <div className="max-w-2xl mx-auto">
@@ -275,16 +267,10 @@ export default function App() {
                 <h2 className="text-6xl font-black tracking-tighter mb-6">Start a <span className="text-fuchsia-500">Project.</span></h2>
                 <p className="text-zinc-400 text-lg">Select a service to see specialized pricing and availability.</p>
               </div>
-
               <form onSubmit={handleInitialFormSubmit} className="space-y-8">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {Object.keys(SERVICE_PRICES).map(s => (
-                    <button 
-                      key={s} 
-                      type="button" 
-                      onClick={() => setBookingService(s)}
-                      className={`p-8 rounded-[2rem] border-2 text-left transition-all relative overflow-hidden group ${bookingService === s ? 'border-fuchsia-500 bg-fuchsia-500/5' : 'border-zinc-900 bg-zinc-900/50 hover:border-zinc-800'}`}
-                    >
+                    <button key={s} type="button" onClick={() => setBookingService(s)} className={`p-8 rounded-[2rem] border-2 text-left transition-all relative overflow-hidden group ${bookingService === s ? 'border-fuchsia-500 bg-fuchsia-500/5' : 'border-zinc-900 bg-zinc-900/50 hover:border-zinc-800'}`}>
                       <div className="relative z-10">
                         <p className={`text-xs font-black uppercase tracking-widest mb-2 ${bookingService === s ? 'text-fuchsia-400' : 'text-zinc-500'}`}>{s}</p>
                         <p className="text-2xl font-black">{SERVICE_PRICES[s].price}</p>
@@ -293,30 +279,21 @@ export default function App() {
                     </button>
                   ))}
                 </div>
-
                 {bookingService && (
                   <div className="p-6 bg-zinc-900/80 rounded-2xl border border-white/5 animate-in fade-in duration-300">
                     <p className="text-zinc-400 text-sm leading-relaxed"><strong className="text-white">Included:</strong> {SERVICE_PRICES[bookingService].description}</p>
                   </div>
                 )}
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <input name="name" type="text" placeholder="Full Name" required className="w-full bg-zinc-900 border-2 border-transparent rounded-2xl p-5 focus:border-fuchsia-500 outline-none transition-all" />
                   <input name="email" type="email" placeholder="Email Address" required className="w-full bg-zinc-900 border-2 border-transparent rounded-2xl p-5 focus:border-fuchsia-500 outline-none transition-all" />
                 </div>
-
                 <div className="grid grid-cols-2 gap-4">
                   <input name="date" type="date" required className="w-full bg-zinc-900 border-2 border-transparent rounded-2xl p-5 focus:border-fuchsia-500 outline-none [color-scheme:dark]" />
                   <input name="time" type="time" required className="w-full bg-zinc-900 border-2 border-transparent rounded-2xl p-5 focus:border-fuchsia-500 outline-none [color-scheme:dark]" />
                 </div>
-
                 <div className="relative">
-                  <textarea 
-                    value={visionText} 
-                    onChange={(e) => setVisionText(e.target.value)} 
-                    placeholder="Describe your creative vision or mood board ideas..." 
-                    className="w-full bg-zinc-900 border-2 border-transparent rounded-3xl p-6 h-40 focus:border-fuchsia-500 outline-none resize-none transition-all"
-                  />
+                  <textarea value={visionText} onChange={(e) => setVisionText(e.target.value)} placeholder="Describe your creative vision..." className="w-full bg-zinc-900 border-2 border-transparent rounded-3xl p-6 h-40 focus:border-fuchsia-500 outline-none resize-none transition-all" />
                   {visionText.length > 5 && bookingService && (
                     <button type="button" onClick={enhanceVisionWithAI} className="absolute bottom-6 right-6 bg-zinc-800 text-fuchsia-400 px-5 py-2.5 rounded-full text-xs font-black hover:bg-fuchsia-500 hover:text-white transition-all flex items-center gap-2 shadow-xl border border-fuchsia-500/20">
                       <Sparkles className={`w-4 h-4 ${isGeneratingVision ? 'animate-spin' : ''}`} />
@@ -324,28 +301,18 @@ export default function App() {
                     </button>
                   )}
                 </div>
-
-                <button 
-                  type="submit" 
-                  disabled={!bookingService}
-                  className="w-full bg-white text-black py-6 rounded-3xl font-black text-xl hover:bg-fuchsia-500 hover:text-white transition-all disabled:opacity-50 shadow-2xl shadow-white/5 active:scale-[0.98]"
-                >
-                  Review Booking Details
-                </button>
+                <button type="submit" disabled={!bookingService} className="w-full bg-white text-black py-6 rounded-3xl font-black text-xl hover:bg-fuchsia-500 hover:text-white transition-all disabled:opacity-50 shadow-2xl shadow-white/5 active:scale-[0.98]">Review Booking Details</button>
               </form>
             </div>
           )}
-
           {step === 'checkout' && (
             <div className="animate-in zoom-in-95 fade-in duration-400">
               <div className="bg-zinc-900 rounded-[3rem] p-10 md:p-16 border border-white/5 shadow-2xl relative overflow-hidden">
                 <div className="absolute -top-20 -right-20 w-64 h-64 bg-fuchsia-500/10 blur-[100px] rounded-full"></div>
-                
                 <div className="flex justify-between items-start mb-12 relative z-10">
                   <h3 className="text-4xl font-black tracking-tighter">Reservation Summary</h3>
                   <button onClick={() => setStep('form')} className="p-2 hover:bg-white/5 rounded-full transition-colors"><X className="w-6 h-6"/></button>
                 </div>
-
                 <div className="space-y-8 mb-16 relative z-10">
                   <div className="flex justify-between items-center border-b border-white/5 pb-6">
                     <span className="text-zinc-500 font-black uppercase text-xs tracking-[0.2em]">Service Selected</span>
@@ -364,21 +331,9 @@ export default function App() {
                     <span className="text-5xl font-black text-white">{SERVICE_PRICES[bookingService].price}</span>
                   </div>
                 </div>
-
                 <div className="space-y-6 relative z-10">
-                  <button 
-                    onClick={handleFinalCheckoutSubmit}
-                    disabled={isSubmitting}
-                    className="w-full bg-fuchsia-600 text-white py-6 rounded-3xl font-black text-2xl flex items-center justify-center gap-4 hover:bg-fuchsia-500 transition-all shadow-xl shadow-fuchsia-600/30 active:scale-[0.98]"
-                  >
-                    {isSubmitting ? (
-                      <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    ) : (
-                      <>
-                        <ShieldCheck className="w-7 h-7" />
-                        Complete Reservation
-                      </>
-                    )}
+                  <button onClick={handleFinalCheckoutSubmit} disabled={isSubmitting} className="w-full bg-fuchsia-600 text-white py-6 rounded-3xl font-black text-2xl flex items-center justify-center gap-4 hover:bg-fuchsia-500 transition-all shadow-xl shadow-fuchsia-600/30 active:scale-[0.98]">
+                    {isSubmitting ? <div className="w-8 h-8 border-4 border-white/30 border-t-white rounded-full animate-spin"></div> : <><ShieldCheck className="w-7 h-7" />Complete Reservation</>}
                   </button>
                   <div className="flex items-center justify-center gap-2 text-zinc-500">
                     <CheckCircle2 className="w-4 h-4 text-green-500" />
@@ -388,12 +343,9 @@ export default function App() {
               </div>
             </div>
           )}
-
           {step === 'success' && (
             <div className="text-center py-20 animate-in zoom-in-90 fade-in duration-600">
-              <div className="w-32 h-32 bg-fuchsia-500/10 rounded-full flex items-center justify-center mx-auto mb-10 border border-fuchsia-500/20">
-                <CheckCircle2 className="w-16 h-16 text-fuchsia-500" />
-              </div>
+              <div className="w-32 h-32 bg-fuchsia-500/10 rounded-full flex items-center justify-center mx-auto mb-10 border border-fuchsia-500/20"><CheckCircle2 className="w-16 h-16 text-fuchsia-500" /></div>
               <h2 className="text-6xl font-black tracking-tighter mb-6">Confirmed.</h2>
               <p className="text-zinc-400 text-xl mb-12 leading-relaxed">Your session for <span className="text-white font-bold">{formData.date}</span> is officially on the calendar. Check your inbox at <span className="text-fuchsia-400 font-bold">{formData.email}</span> for session details.</p>
               <button onClick={() => setStep('form')} className="text-fuchsia-500 font-black uppercase text-sm tracking-widest hover:text-white transition-colors border-b-2 border-fuchsia-500 pb-1">Create Another Booking</button>
@@ -402,7 +354,6 @@ export default function App() {
         </div>
       </section>
 
-      {/* Footer */}
       <footer className="py-32 px-6 border-t border-white/5 text-center">
         <div className="flex justify-center gap-8 mb-12">
           <a href="#" className="w-14 h-14 rounded-full bg-white/5 flex items-center justify-center text-zinc-500 hover:text-fuchsia-400 hover:bg-white/10 transition-all"><InstagramIcon /></a>
@@ -411,20 +362,12 @@ export default function App() {
         <p className="text-zinc-600 text-xs font-black uppercase tracking-[0.4em]">© 2026 MLPVISUALS. NYC BASED. WORLDWIDE AVAILABLE.</p>
       </footer>
 
-      {/* Lightbox Overlay */}
       {lightboxImage && (
         <div className="fixed inset-0 z-[100] bg-black/98 backdrop-blur-2xl flex items-center justify-center p-8 animate-in fade-in duration-500" onClick={() => setLightboxImage(null)}>
           <button className="absolute top-10 right-10 text-white p-4 hover:bg-white/10 rounded-full transition-colors"><X className="w-10 h-10" /></button>
           <div className="max-w-7xl max-h-[90vh] flex flex-col items-center gap-6" onClick={(e) => e.stopPropagation()}>
-            <img 
-              src={lightboxImage.src.replace('&w=800', '&w=1600')} 
-              alt={lightboxImage.alt} 
-              className="max-w-full max-h-[80vh] rounded-3xl shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/5" 
-            />
-            <div className="text-center">
-              <h3 className="text-3xl font-black text-white mb-2">{lightboxImage.title}</h3>
-              <p className="text-fuchsia-500 font-black uppercase tracking-widest text-sm">{lightboxImage.category}</p>
-            </div>
+            <img src={lightboxImage.src.replace('&w=800', '&w=1600')} alt={lightboxImage.alt} className="max-w-full max-h-[80vh] rounded-3xl shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/5" />
+            <div className="text-center"><h3 className="text-3xl font-black text-white mb-2">{lightboxImage.title}</h3><p className="text-fuchsia-500 font-black uppercase tracking-widest text-sm">{lightboxImage.category}</p></div>
           </div>
         </div>
       )}
